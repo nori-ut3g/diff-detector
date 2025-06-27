@@ -26,14 +26,27 @@ Or add to your project's `project.clj`:
 
 ## Configuration
 
+### Project Configuration
+
 Configure critical namespaces in your `project.clj`:
 
 ```clojure
 :diff-detector {:namespaces ["my-app.security.*" 
                              "my-app.payment.core"
-                             "my-app.compliance.*"]
-                :base-commit "origin/main"
-                :target-commit "HEAD"}
+                             "my-app.compliance.*"]}
+```
+
+### Environment Variables
+
+You can set default values for base and target commits using environment variables:
+
+- `DIFF_DETECTOR_BASE` - Default base commit (fallback: origin/main)
+- `DIFF_DETECTOR_TARGET` - Default target commit (fallback: HEAD)
+
+```bash
+# Example: Set defaults for your development environment
+export DIFF_DETECTOR_BASE=develop
+export DIFF_DETECTOR_TARGET=HEAD
 ```
 
 ### Namespace Patterns
@@ -55,16 +68,32 @@ lein diff-detector --summary
 # Specify custom commits
 lein diff-detector --base main --target feature-branch
 
+# Using branch patterns (wildcards)
+lein diff-detector --base "origin/dev/*" --target HEAD
+
+# Check all release branches against main
+lein diff-detector --base origin/main --target "origin/release/*"
+
 # Show help
 lein diff-detector --help
 ```
 
 ### Command Line Options
 
-- `-b, --base BASE` - Base commit to compare from (default: origin/main)
-- `-t, --target TARGET` - Target commit to compare to (default: HEAD)
+- `-b, --base BASE` - Base commit/branch pattern to compare from (default: origin/main)
+- `-t, --target TARGET` - Target commit/branch pattern to compare to (default: HEAD)
 - `-s, --summary` - Show detailed summary
 - `-h, --help` - Show help
+
+### Branch Patterns
+
+You can use wildcards (`*`) in branch names to check multiple branches at once:
+
+- `origin/dev/*` - Matches all branches starting with `origin/dev/`
+- `release/*` - Matches all branches starting with `release/`
+- `*/1.2.0` - Matches all branches ending with `/1.2.0`
+
+When using branch patterns, the tool will check all combinations of matching branches.
 
 ### Exit Codes
 
@@ -92,8 +121,7 @@ lein diff-detector --help
 
 ### Output Examples
 
-When critical changes are detected:
-
+When using specific branches:
 ```
 ⚠️  Critical namespace changes detected!
 
@@ -102,20 +130,47 @@ Changed files in critical namespaces:
   - src/my_app/payment/gateway.clj
 ```
 
-When no critical changes are detected:
-
+When using branch patterns:
 ```
-✅ No critical namespace changes detected.
+Checking: origin/main -> origin/dev/1.1.0
+  ⚠️  Changes detected:
+    - src/my_app/security/auth.clj
+
+Checking: origin/main -> origin/dev/1.2.0
+  ⚠️  Changes detected:
+    - src/my_app/security/auth.clj
+    - src/my_app/payment/gateway.clj
+
+⚠️  Critical namespace changes detected in one or more branches!
+
+Summary:
+  origin/main -> origin/dev/1.1.0: 1 files changed
+  origin/main -> origin/dev/1.2.0: 2 files changed
+```
+
+When no critical changes are detected:
+```
+✅ No critical namespace changes detected in any branch combinations.
 ```
 
 ## CI/CD Integration
 
-The plugin is designed to work seamlessly with CI/CD pipelines:
+The plugin is designed to work seamlessly with CI/CD pipelines. Since base and target branches are dynamic in CI environments, always specify them via CLI options or environment variables rather than in project.clj.
+
+### GitHub Actions
 
 ```yaml
-# Example GitHub Actions workflow
+# For pull requests
 - name: Check critical namespace changes
-  run: lein diff-detector --base ${{ github.event.pull_request.base.sha }} --target ${{ github.sha }}
+  run: lein diff-detector --base origin/${{ github.base_ref }} --target origin/${{ github.head_ref }}
+  continue-on-error: true
+
+# Using environment variables
+- name: Check critical namespace changes
+  env:
+    DIFF_DETECTOR_BASE: origin/${{ github.base_ref }}
+    DIFF_DETECTOR_TARGET: origin/${{ github.head_ref }}
+  run: lein diff-detector
   continue-on-error: true
   
 - name: Require additional approval for critical changes
@@ -129,6 +184,38 @@ The plugin is designed to work seamlessly with CI/CD pipelines:
         pull_number: context.issue.number,
         reviewers: ['security-team', 'compliance-team']
       })
+```
+
+### GitLab CI
+
+```yaml
+check-critical-namespaces:
+  script:
+    - lein diff-detector --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --target origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
+  only:
+    - merge_requests
+  allow_failure: false
+```
+
+### Jenkins
+
+```groovy
+stage('Check Critical Namespaces') {
+    steps {
+        sh 'lein diff-detector --base origin/${ghprbTargetBranch} --target origin/${ghprbSourceBranch}'
+    }
+}
+```
+
+### CircleCI
+
+```yaml
+- run:
+    name: Check critical namespace changes
+    command: |
+      if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+        lein diff-detector --base origin/$CIRCLE_PR_BASE_BRANCH --target origin/$CIRCLE_PR_HEAD_BRANCH
+      fi
 ```
 
 ## Development

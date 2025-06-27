@@ -76,12 +76,37 @@
                        :namespace-patterns namespace-patterns}
                       e)))))
 
-(defn detect-function-changes
-  "Placeholder for future function-level detection."
-  [base-commit target-commit function-patterns]
-  (throw (UnsupportedOperationException. "Function-level detection not yet implemented")))
+(defn branch-pattern->regex
+  "Converts a branch pattern like 'dev/*' to a regex pattern."
+  [pattern]
+  (-> pattern
+      (str/replace "." "\\.")
+      (str/replace "-" "\\-")
+      (str/replace "/" "\\/")
+      (str/replace "*" ".*")
+      (#(str "^" % "$"))
+      re-pattern))
 
-(defn detect-metadata-changes
-  "Placeholder for future metadata/annotation detection."
-  [base-commit target-commit metadata-patterns]
-  (throw (UnsupportedOperationException. "Metadata detection not yet implemented")))
+(defn get-matching-branches
+  "Gets all branches matching the given pattern."
+  [branch-pattern]
+  (let [result (shell/sh "git" "branch" "-r" "--format=%(refname:short)")]
+    (if (zero? (:exit result))
+      (let [all-branches (->> (:out result)
+                              str/trim
+                              str/split-lines
+                              (remove str/blank?))
+            regex (branch-pattern->regex branch-pattern)]
+        (filter #(re-matches regex %) all-branches))
+      (throw (ex-info "Failed to list branches"
+                      {:exit-code (:exit result)
+                       :error (:err result)})))))
+
+(defn resolve-branch-pattern
+  "Resolves a branch pattern to actual branch names.
+  If the pattern contains wildcards, returns all matching branches.
+  Otherwise, returns the pattern as-is."
+  [branch-pattern]
+  (if (str/includes? branch-pattern "*")
+    (get-matching-branches branch-pattern)
+    [branch-pattern]))

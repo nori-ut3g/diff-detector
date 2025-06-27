@@ -1,8 +1,7 @@
 (ns leiningen.diff-detector
   (:require [clojure.tools.cli :as cli]
             [diff-detector.core :as core]
-            [clojure.string :as str]
-            [leiningen.core.main :as lein]))
+            [clojure.string :as str]))
 
 (def cli-options
   [["-b" "--base BASE" "Base commit"
@@ -31,22 +30,6 @@
       (println "✅ No critical namespace changes detected.")
       0))) ; Exit code 0
 
-(defn- get-config
-  "Gets the diff-detector configuration from project.clj."
-  [project]
-  (get project :diff-detector {}))
-
-(defn- merge-options
-  "Merges CLI options with project configuration."
-  [cli-opts project-config]
-  (merge {:base-commit "origin/main"
-          :target-commit "HEAD"
-          :namespaces []}
-         project-config
-         (select-keys cli-opts [:base :target])
-         (when (:base cli-opts) {:base-commit (:base cli-opts)})
-         (when (:target cli-opts) {:target-commit (:target cli-opts)})))
-
 (defn diff-detector
   "Leiningen plugin to detect changes in critical namespaces.
   
@@ -57,20 +40,24 @@
     lein diff-detector --help                             # Show help
   
   Configuration in project.clj:
-    :diff-detector {:namespaces [\"my-app.security.*\" \"my-app.payment.core\"]
-                    :base-commit \"origin/main\"
-                    :target-commit \"HEAD\"}"
+    :diff-detector {:namespaces [\"my-app.security.*\" \"my-app.payment.core\"]}
+  
+  Environment variables:
+    DIFF_DETECTOR_BASE    - Default base commit (fallback: origin/main)
+    DIFF_DETECTOR_TARGET  - Default target commit (fallback: HEAD)"
   [project & args]
   (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)
-        config (get-config project)
-        merged-config (merge-options options config)]
+        config (get project :diff-detector {})
+        base-commit (or (:base options) "origin/main")
+        target-commit (or (:target options) "HEAD")
+        namespaces (:namespaces config)]
     
     (cond
       errors
       (do
         (doseq [error errors]
           (println error))
-        (lein/exit 1))
+        (System/exit 1))
       
       (:help options)
       (do
@@ -82,27 +69,26 @@
         (println summary)
         (println)
         (println "Configuration in project.clj:")
-        (println "  :diff-detector {:namespaces [\"my-app.security.*\" \"my-app.payment.core\"]")
-        (println "                  :base-commit \"origin/main\"")
-        (println "                  :target-commit \"HEAD\"}")
-        (lein/exit 0))
+        (println "  :diff-detector {:namespaces [\"my-app.security.*\" \"my-app.payment.core\"]}")
+        (println)
+        (println "Environment variables:")
+        (println "  DIFF_DETECTOR_BASE    - Default base commit (fallback: origin/main)")
+        (println "  DIFF_DETECTOR_TARGET  - Default target commit (fallback: HEAD)")
+        (System/exit 0))
       
-      (empty? (:namespaces merged-config))
+      (empty? namespaces)
       (do
         (println "Error: No critical namespaces configured.")
         (println "Add :diff-detector {:namespaces [...]} to your project.clj")
-        (lein/exit 1))
+        (System/exit 1))
       
       :else
       (try
-        (let [result (core/detect-critical-changes
-                      (:base-commit merged-config)
-                      (:target-commit merged-config)
-                      (:namespaces merged-config))
+        (let [result (core/detect-critical-changes base-commit target-commit namespaces)
               exit-code (format-output result (:summary options))]
-          (lein/exit exit-code))
+          (System/exit exit-code))
         (catch Exception e
           (println "Error:" (.getMessage e))
           (when (instance? clojure.lang.ExceptionInfo e)
             (println "Details:" (pr-str (ex-data e))))
-          (lein/exit 1))))))
+          (System/exit 1))))))
